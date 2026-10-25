@@ -33,7 +33,6 @@ const REC = {
 
   SEND_SUMMARY_EMAIL: true,
   SEND_REMINDER_EMAIL: true,
-  DASHBOARD_URL: '', // paste the partner dashboard link here once it exists
 
   // Columns hidden from view (still used by the scripts)
   HIDDEN: ['Needs Final Numbers', 'Last Updated', 'Response ID', 'Edit Link', 'Reminder Sent'],
@@ -554,7 +553,9 @@ function sendSubmissionSummary_(response, newRows, isEdit) {
   }
 
   const links = [];
-  if (REC.DASHBOARD_URL) links.push('<a href="' + REC.DASHBOARD_URL + '">View your dashboard →</a>');
+  // Step 4 (when present) gives each organization a private dashboard link.
+  const dashboardLink = typeof dashboardLinkFor_ === 'function' ? safe_(() => dashboardLinkFor_(org), '') : '';
+  if (dashboardLink) links.push('<a href="' + dashboardLink + '">View your dashboard →</a>');
   if (editLink && !flagged.length) links.push('<a href="' + editLink + '">Edit this response</a>');
   if (links.length) lines.push('<p>' + links.join(' &nbsp;·&nbsp; ') + '</p>');
 
