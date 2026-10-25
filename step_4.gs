@@ -62,7 +62,8 @@ function onOpenStep4_(menu) {
     .addItem('Set up dashboards (Step 4)', 'setupDashboards')
     .addItem('Show dashboard links', 'showDashboardLinks')
     .addItem('Replace a dashboard link', 'replaceDashboardLink')
-    .addItem('Refresh impact summary', 'refreshDashboardData');
+    .addItem('Refresh impact summary', 'refreshDashboardData')
+    .addItem('Check dashboard', 'checkDashboard');
 }
 
 // ───────────────────────────── Setup and links ─────────────────────────────
@@ -87,6 +88,8 @@ function setupDashboards() {
     return;
   }
   props_().setProperty(DASH_KEYS.URL, url);
+  // The web app has no "active" spreadsheet, so it finds this one by its saved ID.
+  if (!props_().getProperty(KEYS.SPREADSHEET_ID)) props_().setProperty(KEYS.SPREADSHEET_ID, SpreadsheetApp.getActive().getId());
   ensureDashboardKeys_();
   writeLinksSheet_();
   refreshDashboardData();
@@ -226,21 +229,71 @@ function appendLinkRow_(org, key) {
 // ───────────────────────────── Web app ─────────────────────────────
 
 function doGet(e) {
-  const p = (e && e.parameter) || {};
-  const access = dashboardAccess_(p.k);
-  if (!access) {
-    return HtmlService.createHtmlOutput(
-      '<p style="font-family:sans-serif;padding:24px">This dashboard link isn’t valid. Please ask TPW for a new one.</p>'
-    ).setTitle(DASH.TITLE);
+  try {
+    const p = (e && e.parameter) || {};
+    const access = dashboardAccess_(p.k);
+    if (!access) return dashboardMessage_('This dashboard link isn’t valid. Please ask TPW for a new one.');
+    if (p.download) return dashboardDownload_(access, p);
+    return renderDashboard_(access);
+  } catch (err) {
+    // Web app failures are hard to inspect in Executions, so log the full error and say what went wrong.
+    console.error('Dashboard failed: ' + (err && err.stack ? err.stack : err));
+    return dashboardMessage_('The dashboard couldn’t load. Please tell TPW. (' + (err && err.message ? err.message : err) + ')');
   }
-  if (p.download) return dashboardDownload_(access, p);
+}
 
+function renderDashboard_(access) {
   const t = HtmlService.createTemplateFromFile(DASH.HTML_FILE);
   // Escaping "<" keeps the data from closing the <script> tag it's embedded in.
   t.data = JSON.stringify(dashboardPayload_(access)).replace(/</g, '\\u003c');
   return t.evaluate()
     .setTitle(DASH.TITLE)
     .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+}
+
+function dashboardMessage_(text) {
+  return HtmlService.createHtmlOutput('<p style="font-family:sans-serif;padding:24px">' + esc_(text) + '</p>')
+    .setTitle(DASH.TITLE);
+}
+
+/** TPW Tools → Check dashboard: runs the web app's setup checks and builds the admin page, reporting what fails. */
+function checkDashboard() {
+  const lines = [];
+  const check = (label, fn) => {
+    try {
+      const note = fn();
+      lines.push('✓ ' + label + (note ? ' – ' + note : ''));
+      return true;
+    } catch (err) {
+      lines.push('✗ ' + label + ' – ' + (err && err.message ? err.message : err));
+      return false;
+    }
+  };
+
+  check('Spreadsheet ID saved for the web app', () => {
+    if (props_().getProperty(KEYS.SPREADSHEET_ID)) return '';
+    props_().setProperty(KEYS.SPREADSHEET_ID, SpreadsheetApp.getActive().getId());
+    return 'was missing, now saved. Deploy a new version for the web app to pick it up';
+  });
+  check('Web app URL saved', () => {
+    const url = dashboardUrl_();
+    if (!/\/exec$/.test(url)) throw new Error(url ? 'saved URL doesn’t end in /exec: ' + url : 'run "Set up dashboards (Step 4)"');
+    return url;
+  });
+  check('Admin link created', () => {
+    if (!props_().getProperty(DASH_KEYS.ADMIN)) throw new Error('run "Set up dashboards (Step 4)"');
+  });
+  check('HTML file named "' + DASH.HTML_FILE + '" exists', () => { HtmlService.createTemplateFromFile(DASH.HTML_FILE); });
+  check('Records tab readable', () => dashboardRows_().length + ' records counted');
+  check('Admin dashboard page builds', () => {
+    const size = renderDashboard_({ admin: true, key: props_().getProperty(DASH_KEYS.ADMIN) || '' }).getContent().length;
+    return Math.round(size / 1024) + ' KB';
+  });
+
+  lines.push('', 'If every line passes but the link still fails: open it in a private window (several signed-in Google ' +
+    'accounts break web apps), and check Deploy → Manage deployments → Who has access: Anyone. ' +
+    'After changing code, deploy a new version.');
+  SpreadsheetApp.getUi().alert('Dashboard check', lines.join('\n'), SpreadsheetApp.getUi().ButtonSet.OK);
 }
 
 /** { admin: true } for TPW's key, { org } for an organization's key, null otherwise. */
