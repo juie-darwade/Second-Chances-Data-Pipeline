@@ -34,6 +34,10 @@ const REC = {
   SEND_SUMMARY_EMAIL: true,
   SEND_REMINDER_EMAIL: true,
 
+  // Sentence reduction: every full CREDIT_HOURS of total hours attended earns CREDIT_DAYS.
+  CREDIT_HOURS: 52,
+  CREDIT_DAYS: 10,
+
   // Columns hidden from view (still used by the scripts)
   HIDDEN: ['Needs Final Numbers', 'Last Updated', 'Response ID', 'Edit Link', 'Reminder Sent'],
 
@@ -46,10 +50,11 @@ const REC = {
     'Status',
     'Start Date',
     'End Date',
-    'Total Programming Hours',
+    'Course Duration (hours)',
     'Number of Participants',
     'Number of Participants Completed',
-    'Total Participant Programming Hours',
+    'Total Hours Attended',
+    'Prison Days Reduced',
     'Program Year',
     'Notes',
     'Needs Final Numbers',
@@ -84,6 +89,7 @@ const FLAG_HELP = {
     '"Has this program run already ended?" to Yes and add the final numbers. If it was extended, update the end date.',
 };
 
+
 // Column positions (0-based) for readability
 const C = REC.HEADERS.reduce((acc, h, i) => {
   acc[h] = i;
@@ -97,7 +103,9 @@ function onOpenStep2_(menu) {
     .addSeparator()
     .addItem('Set up records (Step 2)', 'setupRecords')
     .addItem('Rebuild all records from responses', 'rebuildAllRecords')
-    .addItem('Refresh statuses now', 'refreshStatuses');
+    .addItem('Refresh statuses now', 'refreshStatuses')
+    .addItem('Send due reminders now', 'sendRemindersNow')
+    .addItem('Diagnose latest response', 'diagnoseLatestResponse');
 }
 
 // ───────────────────────────── Setup ─────────────────────────────
@@ -134,7 +142,15 @@ function setupRecords() {
 function recordsSheet_() {
   const ss = ss_();
   let sh = ss.getSheetByName(REC.SHEET);
-  if (sh) return sh;
+  if (sh) {
+    // Columns added in later versions: rewrite the header row if it is out of date.
+    const header = sh.getRange(1, 1, 1, REC.HEADERS.length).getValues()[0];
+    if (header.some((h, i) => h !== REC.HEADERS[i])) {
+      sh.getRange(1, 1, 1, REC.HEADERS.length).setValues([REC.HEADERS]).setFontWeight('bold').setBackground('#e8eaed');
+      applyColumnVisibility_(sh);
+    }
+    return sh;
+  }
 
   sh = ss.insertSheet(REC.SHEET);
   sh.getRange(1, 1, 1, REC.HEADERS.length)
@@ -175,8 +191,15 @@ function applyColumnVisibility_(sh) {
 
 /** Form-submit trigger: fires for new responses AND edited responses. */
 function onTpwFormSubmit(e) {
-  const response = e && e.response;
-  if (!response) return;
+  if (!e || !e.response) return;
+  // Re-read the saved response from the form. When a response is EDITED, the event
+  // may not carry every answer (e.g. unchanged ones), so always use the full copy.
+  let response = e.response;
+  try {
+    response = getForm_().getResponse(e.response.getId()) || e.response;
+  } catch (err) {
+    console.warn('Could not re-read response ' + e.response.getId() + ': ' + err);
+  }
   const lock = LockService.getScriptLock();
   lock.waitLock(30000);
   let rows, previousCount;
@@ -200,8 +223,59 @@ function onTpwFormSubmit(e) {
   }
 }
 
+/**
+ * Menu: shows every answer in the most recently submitted or edited response,
+ * where it sits in the form, and the records the script builds from it.
+ */
+function diagnoseLatestResponse() {
+  const responses = getForm_().getResponses();
+  if (!responses.length) {
+    SpreadsheetApp.getUi().alert('The form has no responses yet.');
+    return;
+  }
+  const latest = responses.reduce((a, b) => (b.getTimestamp() > a.getTimestamp() ? b : a));
+  const byId = {};
+  readMap_().forEach(r => { byId[String(r.itemId)] = r; });
+
+  const lines = [];
+  lines.push('Response ' + latest.getId());
+  lines.push('Last saved: ' + latest.getTimestamp() + '  by ' + safe_(() => latest.getRespondentEmail(), '?'));
+  lines.push('');
+  lines.push('ANSWERS SAVED BY GOOGLE (entry | section | chain | slot | question = answer)');
+  latest.getItemResponses().forEach(ir => {
+    const m = byId[String(ir.getItem().getId())] || {};
+    lines.push([m.entry, m.section, m.chain || '-', m.slot || '-', ir.getItem().getTitle()].join(' | ') +
+      ' = ' + JSON.stringify(ir.getResponse()));
+  });
+  lines.push('');
+  lines.push('RECORDS THE SCRIPT BUILDS (yard | status | course hrs | participants | completed | hrs attended | days)');
+  recordsFromResponse_(latest, mapIndex_(readMap_()), today_()).forEach(r => {
+    lines.push([r[C['Yard']] || '(no yard)', r[C['Status']], r[C['Course Duration (hours)']],
+      r[C['Number of Participants']], r[C['Number of Participants Completed']],
+      r[C['Total Hours Attended']], r[C['Prison Days Reduced']]].join(' | '));
+  });
+
+  const html = HtmlService.createHtmlOutput(
+    '<pre style="font:12px/1.4 monospace;white-space:pre-wrap">' + esc_(lines.join('\n')) + '</pre>'
+  ).setWidth(900).setHeight(600);
+  SpreadsheetApp.getUi().showModalDialog(html, 'Latest response: what the script reads');
+}
+
+/** Menu: run today's status refresh and reminders immediately (for testing). */
+function sendRemindersNow() {
+  refreshStatuses();
+  const sent = sendDueReminders_();
+  SpreadsheetApp.getUi().alert(
+    sent
+      ? 'Sent ' + sent + ' reminder email' + (sent === 1 ? '' : 's') + '.'
+      : 'No reminders were due. A reminder goes out once, the day after a run\u2019s end date, when its final ' +
+          'numbers are missing and its organization has a Reminder Email on TPW Constants. Synthetic data is skipped.'
+  );
+}
+
 /** Daily: move statuses forward as dates pass, then send due reminders. */
 function dailyTpwRefresh() {
+  rebuildAllRecords(); // safety net: picks up any edit the submit trigger missed
   refreshStatuses();
   if (REC.SEND_REMINDER_EMAIL) sendDueReminders_();
 }
@@ -250,11 +324,15 @@ function recordsFromResponse_(response, idx, today) {
   const records = [];
 
   let program = '';
+  let courseHours = '';
   let facility = '';
   let variant = 'program'; // which version of the program-details page this entry used
 
   for (let w = 1; w <= CFG.MAX_ENTRIES; w++) {
-    if (variant === 'program') program = get(w, 'head', 'program_name', variant);
+    if (variant === 'program') {
+      program = get(w, 'head', 'program_name', variant);
+      courseHours = toNumber_(get(w, 'head', 'course_hours', variant));
+    }
     if (variant !== 'dates') facility = get(w, 'head', 'facility', variant);
 
     const start = parseDate_(get(w, 'head', 'start_date', variant));
@@ -269,15 +347,22 @@ function recordsFromResponse_(response, idx, today) {
       records.push(Object.assign({}, base, { ordinal: 1, yard: '', cancelled: true, flags: [] }));
     } else {
       const chain = endedAnswer === CHOICES.ENDED ? 'ended' : 'open';
-      const count = Math.min(Math.max(Number(get(w, 'count', 'yard_count', chain)) || 1, 1), M);
+      const countAnswer = get(w, 'count', 'yard_count', chain);
+      const count = Math.min(Math.max(Number(countAnswer) || 1, 1), M);
+      // One location: newer forms have a separate page without a yard name. Forms built
+      // before that change send "1" to the last yard page instead, so fall back to it.
+      const hasSingleLocationPage = idx[mapKey_(w, 'noyard', chain, '', 'participants')] !== undefined;
+      const noYards = count === 1 && hasSingleLocationPage;
 
       for (let n = 1; n <= count; n++) {
-        const slot = M - count + n;
+        // A single location has its own page; yard pages count back from the end of the chain.
+        const section = noYards ? 'noyard' : 'location';
+        const slot = noYards ? '' : M - count + n;
         const flags = [];
-        const yard = get(w, 'location', 'yard', chain, slot);
-        const participants = toNumber_(get(w, 'location', 'participants', chain, slot));
-        const completed = chain === 'ended' ? toNumber_(get(w, 'location', 'completed', chain, slot)) : '';
-        const hours = toNumber_(get(w, 'location', 'hours', chain, slot));
+        const yard = noYards ? '' : get(w, 'location', 'yard', chain, slot);
+        const participants = toNumber_(get(w, section, 'participants', chain, slot));
+        const completed = chain === 'ended' ? toNumber_(get(w, section, 'completed', chain, slot)) : '';
+        const hours = courseHours;
 
         if (count > 1 && !yard) flags.push('Yard name missing');
         if (completed !== '' && participants !== '' && completed > participants) {
@@ -314,10 +399,10 @@ function toRow_(r, idPrefix, today) {
   if (r.start && r.end && r.end < r.start) flags.push('End date is before start date');
 
   const status = computeStatus_(r.cancelled, r.start, r.end, today);
-  const participantHours =
-    r.completed !== '' && r.completed !== undefined && r.hours !== '' && r.hours !== undefined
-      ? r.completed * r.hours
-      : '';
+  const hasNumbers = typeof r.completed === 'number' && typeof r.hours === 'number';
+  const participantHours = hasNumbers ? r.completed * r.hours : '';
+  // CREDIT_DAYS for every full CREDIT_HOURS of total hours attended.
+  const daysReduced = hasNumbers ? prisonDaysReduced_(participantHours) : '';
 
   const row = new Array(REC.HEADERS.length).fill('');
   row[C['Record ID']] = idPrefix + '-E' + r.entry + '-Y' + r.ordinal;
@@ -328,10 +413,11 @@ function toRow_(r, idPrefix, today) {
   row[C['Status']] = status;
   row[C['Start Date']] = r.start || '';
   row[C['End Date']] = r.end || '';
-  row[C['Total Programming Hours']] = r.cancelled ? '' : r.hours;
+  row[C['Course Duration (hours)']] = r.hours === undefined ? '' : r.hours;
   row[C['Number of Participants']] = r.cancelled ? '' : r.participants;
   row[C['Number of Participants Completed']] = r.cancelled ? '' : r.completed;
-  row[C['Total Participant Programming Hours']] = participantHours;
+  row[C['Total Hours Attended']] = participantHours; // course hours × participants completed
+  row[C['Prison Days Reduced']] = daysReduced;
   row[C['Program Year']] = r.start ? r.start.getFullYear() : '';
   row[C['Notes']] = r.notes;
   row[C['Needs Final Numbers']] = needsFinalNumbers_(status, row) ? 'Yes' : '';
@@ -344,6 +430,11 @@ function toRow_(r, idPrefix, today) {
   return row;
 }
 
+/** Prison days reduced for a total number of hours attended (full CREDIT_HOURS blocks only). */
+function prisonDaysReduced_(hoursAttended) {
+  return Math.floor(Number(hoursAttended) / REC.CREDIT_HOURS) * REC.CREDIT_DAYS;
+}
+
 function computeStatus_(cancelled, start, end, today) {
   if (cancelled) return 'Cancelled';
   if (!start || !end) return '';
@@ -354,7 +445,7 @@ function computeStatus_(cancelled, start, end, today) {
 
 function needsFinalNumbers_(status, row) {
   if (status !== 'Completed') return false;
-  return ['Total Programming Hours', 'Number of Participants', 'Number of Participants Completed']
+  return ['Course Duration (hours)', 'Number of Participants', 'Number of Participants Completed']
     .some(h => row[C[h]] === '' || row[C[h]] === null || row[C[h]] === undefined);
 }
 
@@ -518,7 +609,7 @@ function sendSubmissionSummary_(response, newRows, isEdit) {
     fmtNum_(now.facilities) + ' facilit' + (now.facilities === 1 ? 'y' : 'ies'),
   ];
   if (now.participants) totals.push(fmtNum_(now.participants) + ' participants');
-  if (now.participantHours) totals.push(fmtNum_(now.participantHours) + ' participant hours');
+  if (now.participantHours) totals.push(fmtNum_(now.participantHours) + ' hours attended');
   lines.push(
     '<p><b>' + year + (isCurrentYear ? ' so far' : '') + ':</b> ' + totals.join(' · ') + '</p>'
   );
@@ -537,6 +628,15 @@ function sendSubmissionSummary_(response, newRows, isEdit) {
     );
   }
 
+  // Sentence days earned by participants in this response, and this year overall
+  const thisDays = newRows.reduce((s, r) => s + (typeof r[C['Prison Days Reduced']] === 'number' ? r[C['Prison Days Reduced']] : 0), 0);
+  if (thisDays || now.daysReduced) {
+    const parts = [];
+    if (thisDays) parts.push(fmtNum_(thisDays) + ' days from this ' + (isEdit ? 'update' : 'submission') + yearsNote_(thisDays));
+    if (now.daysReduced) parts.push(fmtNum_(now.daysReduced) + ' days in ' + year + (isCurrentYear ? ' so far' : ''));
+    lines.push('<p><b>Prison days reduced for your participants:</b> ' + parts.join(' · ') + '</p>');
+  }
+
   const editLink = safe_(() => response.getEditResponseUrl(), '');
   const flagged = newRows.filter(r => r[C['Data Flags']]);
   if (flagged.length) {
@@ -551,6 +651,8 @@ function sendSubmissionSummary_(response, newRows, isEdit) {
       '</ul>');
     if (editLink) lines.push('<p><a href="' + editLink + '">Fix these in the form →</a></p>');
   }
+
+
 
   const links = [];
   // Step 4 (when present) gives each organization a private dashboard link.
@@ -591,7 +693,8 @@ function orgStats_(rows, org, year) {
     planned: mine.length - notPlanned.length,
     facilities: new Set(mine.map(r => r[C['CDCR Facility']]).filter(Boolean)).size,
     participants: notPlanned.reduce((s, r) => s + num(r[C['Number of Participants']]), 0),
-    participantHours: mine.reduce((s, r) => s + num(r[C['Total Participant Programming Hours']]), 0),
+    participantHours: mine.reduce((s, r) => s + num(r[C['Total Hours Attended']]), 0),
+    daysReduced: mine.reduce((s, r) => s + num(r[C['Prison Days Reduced']]), 0),
     rate: enrolled > 0 ? completed / enrolled : null,
     rateEnrolled: enrolled,   // participants in finished runs that have both numbers
     rateCompleted: completed,
@@ -607,7 +710,7 @@ function orgStats_(rows, org, year) {
 function sendDueReminders_() {
   const sh = recordsSheet_();
   const rows = readRecordRows_(sh);
-  if (!rows.length) return;
+  if (!rows.length) return 0;
 
   const contacts = orgContacts_();
   const today = today_();
@@ -632,6 +735,7 @@ function sendDueReminders_() {
   });
 
   const sentRows = [];
+  let sentCount = 0;
   Object.keys(byOrg).forEach(org => {
     const { email, runs } = byOrg[org];
     const items = Object.values(runs).map(idxs => {
@@ -649,7 +753,9 @@ function sendDueReminders_() {
     const html =
       '<p>Hello ' + esc_(org) + ',</p>' +
       '<p>The following program run' + (items.length === 1 ? ' has' : 's have') + ' ended. ' +
-      'Please add the final numbers: total programming hours, number of participants, and number of participants completed.</p>' +
+      'Please add the final numbers: number of participants and number of participants completed. ' +
+      'Once you do, we\u2019ll calculate the prison days your participants earned off their sentences ' +
+      '(' + REC.CREDIT_DAYS + ' days for every ' + REC.CREDIT_HOURS + ' hours completed).</p>' +
       '<ul>' + items.join('') + '</ul>' +
       '<p>In the form, set "Has this program run already ended?" to <b>Yes</b> and fill in each yard’s numbers. ' +
       'If the program was cancelled, choose <b>It was cancelled</b> instead.</p>' +
@@ -659,12 +765,14 @@ function sendDueReminders_() {
       MailApp.sendEmail(email, 'TPW: please add final numbers for ' + items.length + ' completed program run' +
         (items.length === 1 ? '' : 's'), htmlToText_(html), { htmlBody: html, name: 'TPW Program Reporting' });
       Object.values(runs).forEach(idxs => sentRows.push(...idxs));
+      sentCount++;
     } catch (err) {
       console.warn('Reminder to ' + email + ' failed: ' + err);
     }
   });
 
   sentRows.forEach(i => sh.getRange(i + 2, C['Reminder Sent'] + 1).setValue(today));
+  return sentCount;
 }
 
 /** Organization → Reminder Email, from the TPW Constants tab (keys are lowercase). */
@@ -677,6 +785,11 @@ function orgContacts_() {
     if (n && String(email).trim()) out[n] = String(email).trim();
   });
   return out;
+}
+
+/** " (about 3.4 years)" for large day counts. */
+function yearsNote_(days) {
+  return days >= 365 ? ' (about ' + (Math.round((days / 365) * 10) / 10) + ' years)' : '';
 }
 
 /** Partner-facing explanation of one flag; unknown flags are shown as written. */

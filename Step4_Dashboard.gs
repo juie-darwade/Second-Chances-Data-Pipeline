@@ -21,7 +21,9 @@
  *  Also keeps a "TPW Impact Summary" tab (organization × program year) up to date in the sheet.
  *
  * HOW TO INSTALL (same Apps Script project as Steps 1–3)
- *  1. Extensions → Apps Script → "+" next to Files → Script. Name it Step4_Dashboard. Paste this file.
+ *  1. Extensions → Apps Script. If a Step4_Dashboard file already exists (the older Looker Studio version),
+ *     replace ALL of its contents with this file – the two versions can't both be in the project.
+ *     Otherwise "+" next to Files → Script, name it Step4_Dashboard, and paste this file.
  *  2. "+" next to Files → HTML. Name it Dashboard (exactly). Paste Dashboard.html. Save.
  *  3. Deploy → New deployment → type "Web app". Execute as: Me. Who has access: Anyone. Deploy,
  *     and copy the Web app URL (ends in /exec).
@@ -35,9 +37,9 @@ const DASH = {
   SUMMARY_SHEET: 'TPW Impact Summary',
   TITLE: 'TPW Impact Dashboard',
 
-  // Estimates shown on every page (see the footnotes on the dashboard)
-  CREDIT_HOURS: 52,      // every 52 participant hours delivered …
-  CREDIT_DAYS: 10,       // … earn about 10 days of rehabilitative credit
+  // Estimates shown on every page (see the footnotes on the dashboard).
+  // Credit days come from Step 2's "Prison Days Reduced" column (REC.CREDIT_HOURS / REC.CREDIT_DAYS),
+  // so the dashboard, the sheet and the summary emails always agree.
   COST_PER_YEAR: 21534,  // taxpayer cost of one year in prison (USD)
 
   SUMMARY_HEADERS: [
@@ -318,10 +320,11 @@ function dashboardRows_() {
       facility: String(r[C['CDCR Facility']]).trim(),
       status: r[C['Status']],
       start: startOfDay_(r[C['Start Date']]),
-      hours: number(r[C['Total Programming Hours']]),
+      hours: number(r[C['Course Duration (hours)']]),
       participants: number(r[C['Number of Participants']]),
       completed: number(r[C['Number of Participants Completed']]),
-      participantHours: number(r[C['Total Participant Programming Hours']]),
+      participantHours: number(r[C['Total Hours Attended']]),
+      prisonDays: number(r[C['Prison Days Reduced']]),
       synthetic: String(r[C['Notes']]).indexOf(SYNTHETIC_TAG) >= 0,
     }));
 }
@@ -330,25 +333,27 @@ function dashboardRows_() {
  * The dashboard numbers for a set of records:
  *  • Participants: runs that have started (planned runs don't count yet).
  *  • Completion rate: completed ÷ participants, in finished runs that report both numbers.
- *  • Participant hours delivered: completed × course hours (calculated by Step 2).
- *  • Rehab credits (days) = participant hours ÷ 52 × 10; taxpayer savings = credit days ÷ 365 × $21,534.
+ *  • Participant hours delivered: completed × course hours (Step 2's "Total Hours Attended").
+ *  • Rehab credits (days): sum of Step 2's "Prison Days Reduced" (10 days per full 52 hours attended);
+ *    taxpayer savings = credit days ÷ 365 × $21,534.
  */
 function impact_(rows) {
   let participants = 0;
   let completed = 0;
   let participantHours = 0;
+  let creditDays = 0;
   let rateParticipants = 0;
   let rateCompleted = 0;
   rows.forEach(r => {
     if (r.status !== 'Planned') participants += r.participants || 0;
     completed += r.completed || 0;
     participantHours += r.participantHours || 0;
+    creditDays += r.prisonDays || 0;
     if (r.status === 'Completed' && r.participants !== null && r.completed !== null) {
       rateParticipants += r.participants;
       rateCompleted += r.completed;
     }
   });
-  const creditDays = (participantHours / DASH.CREDIT_HOURS) * DASH.CREDIT_DAYS;
   return {
     orgs: new Set(rows.map(r => norm_(r.org))).size,
     programs: new Set(rows.map(r => norm_(r.org) + '|' + norm_(r.program))).size,
@@ -387,7 +392,7 @@ function series_(rows, today) {
   return out;
 }
 
-/** The most common course length (Total Programming Hours) among the records. */
+/** The most common course length (Course Duration) among the records. */
 function courseHours_(rows) {
   const counts = {};
   rows.forEach(r => { if (r.hours) counts[r.hours] = (counts[r.hours] || 0) + 1; });

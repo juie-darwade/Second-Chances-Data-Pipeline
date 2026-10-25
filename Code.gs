@@ -4,7 +4,7 @@
  * the dropdowns in sync.
  *
  * FORM FLOW (what a partner sees)
- *   Page 1: Organization + Program + Facility + Dates + "Has it ended?"
+ *   Page 1: Organization + Program + Course duration + Facility + Dates + "Has it ended?"
  *   →  "How many yards/locations?" (1–6)
  *   →  one page per yard/location (numbers required if the run has ended)
  *   →  "Is there more to report?"
@@ -404,8 +404,8 @@ function buildEntry_(form, w) {
   };
   const headHelp = {
     program: w === 1 ? '' : 'Tell us about the next program.',
-    facility: 'The program from your previous entry is kept. Choose the facility and dates.',
-    dates: 'The program and facility from your previous entry are kept. Enter the new dates.',
+    facility: 'The program and its course duration from your previous entry are kept. Choose the facility and dates.',
+    dates: 'The program, its course duration and the facility from your previous entry are kept. Enter the new dates.',
   };
 
   variants.forEach(variant => {
@@ -423,6 +423,13 @@ function buildEntry_(form, w) {
         .setHelpText('Example: CEO of Your New Life')
         .setRequired(true);
       rec(program, 'TEXT', 'head', variant, '', 'program_name');
+
+      const courseHours = form.addTextItem()
+        .setTitle('Total Course Duration (hours)')
+        .setHelpText('Total hours of the full course for one participant (e.g., 176). Hours attended are calculated from this.')
+        .setRequired(true)
+        .setValidation(v.positive);
+      rec(courseHours, 'TEXT', 'head', variant, '', 'course_hours');
     }
     if (variant !== 'dates') {
       const facility = form.addListItem()
@@ -443,7 +450,7 @@ function buildEntry_(form, w) {
 
     const ended = form.addMultipleChoiceItem()
       .setTitle('Has this program run already ended?')
-      .setHelpText('If it has ended, you will be asked for final hours and participant numbers.')
+      .setHelpText('If it has ended, you will be asked for final participant numbers.')
       .setRequired(true)
       .setChoiceValues([CHOICES.ENDED, CHOICES.OPEN, CHOICES.CANCELLED]); // navigation added later
     rec(ended, 'MULTIPLE_CHOICE', 'head', variant, '', 'ended');
@@ -503,25 +510,12 @@ function buildEntry_(form, w) {
           .setRequired(true)
           .setValidation(v.zeroOrMore);
         rec(completed, 'TEXT', 'location', chain, j, 'completed');
-
-        const hours = form.addTextItem()
-          .setTitle('Total Programming Hours')
-          .setHelpText('Hours of programming the participants in this yard or location attended together (e.g., 176).')
-          .setRequired(true)
-          .setValidation(v.positive);
-        rec(hours, 'TEXT', 'location', chain, j, 'hours');
       } else {
         const participants = form.addTextItem()
           .setTitle('Number of Participants')
           .setHelpText('Expected number if planned; currently enrolled if running. Leave blank if not known yet.')
           .setValidation(v.positive);
         rec(participants, 'TEXT', 'location', chain, j, 'participants');
-
-        const hours = form.addTextItem()
-          .setTitle('Total Programming Hours')
-          .setHelpText('Planned hours, if known. You can update this later.')
-          .setValidation(v.positive);
-        rec(hours, 'TEXT', 'location', chain, j, 'hours');
       }
     }
   });

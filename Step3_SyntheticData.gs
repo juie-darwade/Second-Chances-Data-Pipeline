@@ -276,17 +276,15 @@ function planSubmission_(n) {
     for (let y = 0; y < yardCount; y++) {
       const enrolled = enrolledFull();
       const rate = program.rate[0] + rnd() * (program.rate[1] - program.rate[0]);
-      const hours = rnd() < 0.15 ? Math.round(program.hours * (0.8 + rnd() * 0.15)) : program.hours; // lockdowns
       const isCurrent = start <= today;
       locations.push({
         yard: yards[y] || '',
         participants: status === 'ended' ? enrolled : (isCurrent ? (rnd() < 0.85 ? enrolled : '') : (rnd() < 0.5 ? enrolled : '')),
         completed: status === 'ended' ? Math.min(enrolled, Math.round(enrolled * rate)) : '',
-        hours: status === 'ended' ? hours : (rnd() < 0.6 ? program.hours : ''),
       });
     }
 
-    entries.push({ variant, program: program.name, facility, start, end, status, locations });
+    entries.push({ variant, program: program.name, courseHours: program.hours, facility, start, end, status, locations });
 
     // What next? Choose a flow, keeping it possible for this organization.
     if (w >= Math.min(entryCount, CFG.MAX_ENTRIES)) break;
@@ -359,7 +357,10 @@ function submitSynthetic_(form, ctx, plan) {
     const facilityName = ctx.facilityByCode[e.facility];
     if (!facilityName) throw new Error('Facility code ' + e.facility + ' is not in TPW Constants.');
 
-    if (v === 'program') add(w, 'head', 'program_name', e.program, v);
+    if (v === 'program') {
+      add(w, 'head', 'program_name', e.program, v);
+      add(w, 'head', 'course_hours', e.courseHours, v);
+    }
     if (v !== 'dates') add(w, 'head', 'facility', facilityName, v);
     add(w, 'head', 'start_date', e.start, v);
     add(w, 'head', 'end_date', e.end, v);
@@ -369,14 +370,20 @@ function submitSynthetic_(form, ctx, plan) {
     if (e.status !== 'cancelled') {
       const chain = e.status === 'ended' ? 'ended' : 'open';
       const k = e.locations.length;
-      add(w, 'count', 'yard_count', String(k), chain);
-      e.locations.forEach((loc, n) => {
-        const slot = M - k + n + 1;
-        add(w, 'location', 'yard', loc.yard, chain, slot);
-        add(w, 'location', 'participants', loc.participants, chain, slot);
-        if (chain === 'ended') add(w, 'location', 'completed', loc.completed, chain, slot);
-        add(w, 'location', 'hours', loc.hours, chain, slot);
-      });
+      if (k === 1) {
+        // One location: entered on the single-location page, no yard name.
+        add(w, 'count', 'yard_count', '1', chain);
+        add(w, 'noyard', 'participants', e.locations[0].participants, chain, '');
+        if (chain === 'ended') add(w, 'noyard', 'completed', e.locations[0].completed, chain, '');
+      } else {
+        add(w, 'count', 'yard_count', String(k), chain);
+        e.locations.forEach((loc, n) => {
+          const slot = M - k + n + 1;
+          add(w, 'location', 'yard', loc.yard, chain, slot);
+          add(w, 'location', 'participants', loc.participants, chain, slot);
+          if (chain === 'ended') add(w, 'location', 'completed', loc.completed, chain, slot);
+        });
+      }
     }
 
     if (w < CFG.MAX_ENTRIES) {
