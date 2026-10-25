@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<!-- TPW impact dashboard. Served by doGet() in Step4_Dashboard; all numbers arrive pre-calculated in DATA. -->
+<style>
+  :root {
+    --bg: #f4f6f8; --card: #ffffff; --line: #dfe3e8; --soft: #eef1f4;
+    --ink: #1b2430; --muted: #5b6672; --dark: #18202a;
+    --blue: #1f5fa6; --orange: #b5531c; --green: #2e7d6b; --purple: #5b4a8b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 20px 16px 48px; }
+  a { color: var(--blue); }
+  button { font: inherit; }
+
+  .nav { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-bottom: 20px; font-size: 13px; color: var(--muted); }
+  .nav .tab { border: 0; background: none; padding: 6px 10px; border-radius: 6px; cursor: pointer; color: var(--muted); font-weight: 600; }
+  .nav .tab.on { background: #e3e8ee; color: var(--ink); }
+  .nav select { font: inherit; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--ink); }
+
+  .head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; margin-bottom: 20px; }
+  .eyebrow { font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin-bottom: 4px; }
+  .crumb { font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+  .crumb button { border: 0; background: none; padding: 0; color: var(--blue); text-decoration: underline; cursor: pointer; }
+  h1 { font-size: 30px; line-height: 1.15; margin: 0 0 6px; }
+  .sub { color: var(--muted); }
+  .chip { display: inline-block; background: #e3ecf7; color: var(--blue); border-radius: 999px; padding: 2px 10px; font-size: 12px; font-weight: 600; margin-right: 6px; }
+  .actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: #fff; }
+  .seg button { border: 0; background: none; padding: 8px 14px; font-weight: 600; cursor: pointer; color: var(--ink); }
+  .seg button.on { background: var(--dark); color: #fff; }
+  .btn { display: inline-flex; align-items: center; gap: 6px; padding: 9px 16px; border-radius: 8px; background: var(--blue); color: #fff; font-weight: 600; text-decoration: none; border: 1px solid var(--blue); }
+
+  .tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-bottom: 18px; }
+  .tiles.four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  @media (max-width: 900px) { .tiles, .tiles.four { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  @media (max-width: 560px) { .tiles, .tiles.four { grid-template-columns: 1fr; } }
+  .tile, .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; }
+  .tile { padding: 16px 18px; }
+  .tile .label { font-size: 13px; color: var(--muted); font-weight: 600; }
+  .tile .value { font-size: 30px; font-weight: 700; margin: 2px 0; letter-spacing: -.01em; }
+  .tile .note { font-size: 12px; color: var(--muted); }
+
+  .card { padding: 20px; margin-bottom: 18px; }
+  .card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+  h2 { font-size: 19px; margin: 0 0 2px; }
+  .empty { color: var(--muted); padding: 24px 0; }
+
+  .charts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 28px; }
+  @media (max-width: 760px) { .charts { grid-template-columns: minmax(0, 1fr); } }
+  .chart-title { font-weight: 600; display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+  .swatch { width: 11px; height: 11px; border-radius: 2px; flex: none; }
+  .chart-scroll { overflow-x: auto; }
+  .cols { display: flex; min-width: 100%; }
+  .col { flex: 1 0 44px; padding: 0 4px; }
+  .plot { height: 190px; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; border-bottom: 1px solid #c9d0d7; margin: 0 -4px; padding: 0 4px; }
+  .plot .v { font-size: 11px; margin-bottom: 4px; white-space: nowrap; }
+  .plot .b { width: 100%; max-width: 52px; border-radius: 3px 3px 0 0; }
+  .x { font-size: 11px; color: var(--muted); text-align: center; padding-top: 6px; white-space: nowrap; }
+
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: right; font-weight: 600; color: var(--muted); padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: bottom; }
+  td { text-align: right; padding: 12px 10px; border-bottom: 1px solid var(--soft); white-space: nowrap; }
+  th:first-child, td:first-child { text-align: left; white-space: normal; }
+  td .link { border: 0; background: none; padding: 0; color: var(--blue); font-weight: 600; text-decoration: underline; cursor: pointer; text-align: left; }
+  .rate { display: flex; align-items: center; gap: 10px; justify-content: flex-end; }
+  .track { width: 90px; height: 7px; background: var(--soft); border-radius: 999px; overflow: hidden; }
+  .track span { display: block; height: 100%; background: var(--orange); border-radius: 999px; }
+
+  .split { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(240px, 1fr); gap: 20px; align-items: start; }
+  @media (max-width: 800px) { .split { grid-template-columns: 1fr; } }
+  .panel { background: var(--bg); border-radius: 10px; padding: 16px; }
+  .panel h3 { font-size: 14px; margin: 0; }
+  .hbar { margin-top: 14px; }
+  .hbar .row { display: flex; justify-content: space-between; font-weight: 600; font-size: 13px; }
+  .hbar .track { width: 100%; height: 12px; margin: 5px 0 3px; background: #e1e5ea; }
+  .hbar .track span { background: var(--blue); }
+  .hbar small { color: var(--muted); font-size: 11px; }
+
+  .foot { background: #eaedf0; border-radius: 12px; padding: 16px 20px; font-size: 13px; }
+  .foot h3 { font-size: 14px; margin: 0 0 6px; }
+  .foot ul { margin: 0; padding-left: 18px; }
+  .foot li { margin: 3px 0; }
+</style>
+</head>
+<body>
+<div class="wrap" id="app"></div>
+
+<script>
+  const DATA = <?!= data ?>;
+
+  const COLORS = { hours: 'var(--blue)', completed: 'var(--orange)', creditDays: 'var(--green)', savings: 'var(--purple)' };
+  const state = {
+    page: DATA.admin ? 'overview' : 'org',
+    orgId: DATA.orgs.length ? DATA.orgs[0].id : null,
+    programId: null,
+    period: 'all',     // all | ytd
+    grain: 'quarter',  // quarter | year
+  };
+
+  // ── Formatting ──
+  const fmt = n => Math.round(n || 0).toLocaleString('en-US');
+  const pct = r => (r === null || r === undefined ? '–' : (r * 100).toFixed(1) + '%');
+  const money = n => '$' + fmt(n);
+  const shortMoney = n => (n >= 1e6 ? '$' + (n / 1e6).toFixed(1) + 'M' : n >= 1e3 ? '$' + Math.round(n / 1e3) + 'K' : money(n));
+  const count = (n, one, many) => fmt(n) + ' ' + (n === 1 ? one : many);
+  const esc = s => String(s === null || s === undefined ? '' : s)
+    .replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+  const org = () => DATA.orgs.find(o => o.id === state.orgId);
+  const program = () => (org() ? org().programs.find(p => p.id === state.programId) : null);
+  const downloadUrl = params => DATA.base + '&' + Object.keys(params)
+    .map(k => k + '=' + encodeURIComponent(params[k])).join('&');
+
+  // ── Building blocks ──
+  function nav() {
+    if (DATA.admin) {
+      const options = DATA.orgs.map(o =>
+        `<option value="${esc(o.id)}" ${state.page !== 'overview' && o.id === state.orgId ? 'selected' : ''}>${esc(o.name)}</option>`).join('');
+      return `<div class="nav">TPW admin view ·
+        <select data-action="pick-org" aria-label="Organization">
+          <option value="" ${state.page === 'overview' ? 'selected' : ''}>All member organizations</option>${options}
+        </select></div>`;
+    }
+    const o = DATA.orgs[0];
+    return `<div class="nav">
+      <button class="tab ${state.page !== 'overview' ? 'on' : ''}" data-go="org" data-org="${esc(o.id)}">${esc(o.name)}</button>
+      <button class="tab ${state.page === 'overview' ? 'on' : ''}" data-go="overview">All member organizations</button>
+    </div>`;
+  }
+
+  function header({ eyebrow, crumb, title, sub, download }) {
+    return `<div class="head">
+      <div>
+        ${eyebrow ? `<div class="eyebrow">${eyebrow}</div>` : ''}
+        ${crumb ? `<div class="crumb">${crumb}</div>` : ''}
+        <h1>${esc(title)}</h1>
+        <div class="sub">${sub}</div>
+      </div>
+      <div class="actions">
+        <div class="seg" role="group" aria-label="Period">
+          <button class="${state.period === 'all' ? 'on' : ''}" data-period="all">All time</button>
+          <button class="${state.period === 'ytd' ? 'on' : ''}" data-period="ytd">${DATA.year} YTD</button>
+        </div>
+        ${download ? `<a class="btn" href="${esc(download.href)}" target="_blank" rel="noopener">⤓ ${esc(download.label)}</a>` : ''}
+      </div>
+    </div>`;
+  }
+
+  function tile(label, value, note) {
+    return `<div class="tile"><div class="label">${label}</div><div class="value">${value}</div><div class="note">${note}</div></div>`;
+  }
+
+  function impactTiles(m, firstTile) {
+    return `<div class="tiles">
+      ${firstTile}
+      ${tile('Participants', fmt(m.participants), fmt(m.completed) + ' completed their program')}
+      ${tile('Participant hours delivered', fmt(m.participantHours), 'Number completed × course hours')}
+      ${tile('Completion rate', pct(m.rate), fmt(m.rateCompleted) + ' of ' + fmt(m.rateParticipants) + ' in finished runs')}
+      ${tile('Rehab credits (estimate)', '~' + fmt(m.creditDays) + ' days', 'Less time in prison: hours delivered ÷ 52 × 10')}
+      ${tile('Taxpayer savings (estimate)', '~' + money(m.savings), 'Credit days ÷ 365 × $21,534')}
+    </div>`;
+  }
+
+  function points(view) {
+    return view.series[state.grain].filter(p => state.period === 'all' || p.year === DATA.year);
+  }
+
+  function chart(title, key, pts, format) {
+    const head = `<div class="chart-title"><span class="swatch" style="background:${COLORS[key]}"></span>${title}</div>`;
+    if (!pts.length) return `<div>${head}<div class="empty">No results for this period yet.</div></div>`;
+    const max = Math.max(1, ...pts.map(p => p[key]));
+    const cols = pts.map(p => `<div class="col">
+        <div class="plot"><span class="v">${format(p[key])}</span>
+          <span class="b" style="height:${Math.round((p[key] / max) * 160)}px;background:${COLORS[key]}"></span></div>
+        <div class="x">${esc(p.label)}</div></div>`).join('');
+    return `<div>${head}<div class="chart-scroll"><div class="cols">${cols}</div></div></div>`;
+  }
+
+  function overTime(view, sub, extra) {
+    const pts = points(view);
+    return `<div class="card">
+      <div class="card-head">
+        <div><h2>Impact over time</h2><div class="sub">${sub}</div></div>
+        <div class="seg" role="group" aria-label="Group by">
+          <button class="${state.grain === 'quarter' ? 'on' : ''}" data-grain="quarter">By quarter</button>
+          <button class="${state.grain === 'year' ? 'on' : ''}" data-grain="year">By program year</button>
+        </div>
+      </div>
+      <div class="charts">
+        ${chart('Participant hours delivered', 'hours', pts, fmt)}
+        ${chart('Participants completed', 'completed', pts, fmt)}
+        ${extra ? chart('Rehab credits (days, estimate)', 'creditDays', pts, fmt) : ''}
+        ${extra ? chart('Taxpayer savings (estimate)', 'savings', pts, shortMoney) : ''}
+      </div>
+    </div>`;
+  }
+
+  function footnotes(items) {
+    return `<div class="foot"><h3>How these numbers are calculated</h3><ul>${items.map(i => `<li>${i}</li>`).join('')}</ul></div>`;
+  }
+
+  const NOTES = [
+    'Participant hours delivered = number completed × course hours (per participant).',
+    'Completion rate = participants who completed ÷ participants, counting finished program runs that report both numbers.',
+    'Participants count program runs that have started; planned runs are not counted yet. Cancelled runs are never counted.',
+    'Rehab credits (days, estimate) = participant hours delivered ÷ 52 × 10.',
+    'Taxpayer savings (estimate) = rehab credit days ÷ 365 × $21,534.',
+    'Program year = the year of the program’s start date. Quarters also follow the start date.',
+  ];
+  const sampleNote = () => (DATA.synthetic ? ' · Includes synthetic test data' : '');
+
+  // ── Pages ──
+  function overviewPage() {
+    const v = DATA.overview;
+    const m = v[state.period];
+    return header({
+      eyebrow: 'TPW Impact Dashboard',
+      title: 'All member organizations',
+      sub: `${count(m.orgs, 'organization', 'organizations')} · ${count(m.programs, 'program', 'programs')} · ${count(m.prisons, 'prison', 'prisons')}${sampleNote()}`,
+      download: DATA.admin ? { href: downloadUrl({ download: 'all' }), label: 'Download all data (CSV)' } : null,
+    }) +
+      impactTiles(m, tile('Programs', fmt(m.programs), 'Across ' + count(m.orgs, 'member organization', 'member organizations'))) +
+      overTime(v, 'Participant hours delivered and participants completed, all organizations, by start date') +
+      footnotes(NOTES.concat('Results are shown in aggregate. Individual organizations are not identified.'));
+  }
+
+  function orgPage() {
+    const o = org();
+    const v = o.view;
+    const m = v[state.period];
+    const rows = o.programs.filter(p => p.view[state.period].programs > 0).map(p => {
+      const pm = p.view[state.period];
+      return `<tr>
+        <td><button class="link" data-go="program" data-program="${esc(p.id)}">${esc(p.name)}</button></td>
+        <td>${fmt(pm.prisons)}</td>
+        <td>${p.view.courseHours === null ? '–' : fmt(p.view.courseHours)}</td>
+        <td>${fmt(pm.participants)}</td>
+        <td>${fmt(pm.completed)}</td>
+        <td>${pct(pm.rate)}</td>
+        <td>${fmt(pm.participantHours)}</td>
+        <td>~${fmt(pm.creditDays)}</td>
+        <td>~${money(pm.savings)}</td>
+      </tr>`;
+    }).join('');
+
+    return header({
+      eyebrow: DATA.admin ? 'Organization' : 'Your organization’s impact',
+      title: o.name,
+      sub: `${count(m.programs, 'program', 'programs')} · ${count(m.prisons, 'prison', 'prisons')} · Visible only to ${esc(o.name)} and TPW${sampleNote()}`,
+      download: { href: downloadUrl({ download: 'org', org: o.name }), label: DATA.admin ? 'Download data (CSV)' : 'Download our data (CSV)' },
+    }) +
+      impactTiles(m, tile('Programs', fmt(m.programs), 'Running at ' + count(m.prisons, 'prison', 'prisons'))) +
+      overTime(v, `Participant hours delivered and participants completed across all ${esc(o.name)} programs, by start date`) +
+      `<div class="card">
+        <h2>Programs</h2><div class="sub" style="margin-bottom:12px">Select a program to see its trend and prison-by-prison results</div>
+        ${rows ? `<div class="table-wrap"><table>
+          <thead><tr><th>Program</th><th>Prisons</th><th>Course hours</th><th>Participated</th><th>Completed</th>
+            <th>Completion rate</th><th>Participant hours delivered</th><th>Rehab credits (days)</th><th>Taxpayer savings</th></tr></thead>
+          <tbody>${rows}</tbody></table></div>`
+          : '<div class="empty">No program runs reported for this period yet.</div>'}
+      </div>` +
+      footnotes(NOTES);
+  }
+
+  function programPage() {
+    const o = org();
+    const p = program();
+    const v = p.view;
+    const m = v[state.period];
+    const prisons = v.prisons[state.period];
+    const hours = v.courseHours === null ? '' : fmt(v.courseHours) + ' course hours per participant · ';
+    const maxHours = Math.max(1, ...prisons.map(r => r.participantHours));
+
+    const table = prisons.map(r => `<tr>
+        <td>${esc(r.name)}</td>
+        <td>${r.courseHours === null ? '–' : fmt(r.courseHours)}</td>
+        <td>${fmt(r.participants)}</td>
+        <td>${fmt(r.completed)}</td>
+        <td><div class="rate"><div class="track"><span style="width:${r.rate === null ? 0 : Math.round(r.rate * 100)}%"></span></div><b>${pct(r.rate)}</b></div></td>
+        <td>${fmt(r.participantHours)}</td>
+      </tr>`).join('');
+    const bars = prisons.map(r => `<div class="hbar">
+        <div class="row"><span>${esc(r.name)}</span><span>${fmt(r.participantHours)} hrs</span></div>
+        <div class="track"><span style="width:${Math.round((r.participantHours / maxHours) * 100)}%"></span></div>
+        <small>${fmt(r.completed)} completed${r.courseHours === null ? '' : ' × ' + fmt(r.courseHours) + ' course hours'}</small>
+      </div>`).join('');
+
+    return header({
+      crumb: `<button data-go="org" data-org="${esc(o.id)}">${esc(o.name)}</button> / ${esc(p.name)}`,
+      title: p.name,
+      sub: `${hours}${count(m.prisons, 'prison', 'prisons')}${sampleNote()}`,
+      download: { href: downloadUrl({ download: 'program', org: o.name, program: p.name }), label: 'Download program data (CSV)' },
+    }) +
+      `<div class="tiles four">
+        ${tile('Participants', fmt(m.participants), fmt(m.completed) + ' completed (' + pct(m.rate) + ')')}
+        ${tile('Participant hours delivered', fmt(m.participantHours), v.courseHours === null ? 'Number completed × course hours' : fmt(m.completed) + ' completed × ' + fmt(v.courseHours) + ' course hours')}
+        ${tile('Rehab credits (estimate)', '~' + fmt(m.creditDays) + ' days', 'Hours delivered ÷ 52 × 10')}
+        ${tile('Taxpayer savings (estimate)', '~' + money(m.savings), 'Credit days ÷ 365 × $21,534')}
+      </div>` +
+      overTime(v, `${esc(p.name)} across ${count(v.all.prisons, 'prison', 'prisons')}`, true) +
+      `<div class="card">
+        <h2>Results by prison</h2><div class="sub" style="margin-bottom:12px">${state.period === 'all' ? 'All time' : DATA.year + ' YTD'}, sorted by participants</div>
+        ${prisons.length ? `<div class="split">
+          <div class="table-wrap"><table>
+            <thead><tr><th>Prison</th><th>Course hours</th><th>Participated</th><th>Completed</th><th>Completion rate</th><th>Participant hours delivered</th></tr></thead>
+            <tbody>${table}</tbody></table></div>
+          <div class="panel"><h3>Participant hours delivered by prison</h3><div class="sub" style="font-size:12px">Number completed × course hours</div>${bars}</div>
+        </div>` : '<div class="empty">No program runs reported for this period yet.</div>'}
+      </div>` +
+      footnotes(NOTES);
+  }
+
+  // ── Render and events ──
+  const app = document.getElementById('app');
+
+  function render() {
+    let body;
+    if (state.page === 'program' && program()) body = programPage();
+    else if (state.page !== 'overview' && org()) body = orgPage();
+    else body = overviewPage();
+    app.innerHTML = nav() + body;
+  }
+
+  app.addEventListener('click', e => {
+    const el = e.target.closest('[data-period], [data-grain], [data-go]');
+    if (!el) return;
+    if (el.dataset.period) state.period = el.dataset.period;
+    if (el.dataset.grain) state.grain = el.dataset.grain;
+    if (el.dataset.go) {
+      state.page = el.dataset.go;
+      if (el.dataset.org) state.orgId = el.dataset.org;
+      if (el.dataset.program) state.programId = el.dataset.program;
+      window.scrollTo(0, 0);
+    }
+    render();
+  });
+
+  app.addEventListener('change', e => {
+    if (e.target.dataset.action !== 'pick-org') return;
+    if (e.target.value) {
+      state.page = 'org';
+      state.orgId = e.target.value;
+    } else {
+      state.page = 'overview';
+    }
+    render();
+  });
+
+  render();
+</script>
+</body>
+</html>
