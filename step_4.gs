@@ -49,7 +49,9 @@ const DASH = {
 const DASH_KEYS = {
   URL: 'DASH_URL',             // the deployed web app URL (/exec)
   ADMIN: 'DASH_ADMIN_KEY',     // key in TPW's admin link
-  ORGS: 'DASH_ORG_KEYS',       // JSON { normalized organization name: key }
+  // One property per organization link: DASH_LINK_<key> = organization name. Separate properties
+  // (not one shared list) so two submissions creating links at once can't overwrite each other.
+  LINK_PREFIX: 'DASH_LINK_',
 };
 
 // ───────────────────────────── Menu hook (called from Step 1's onOpen) ─────────────────────────────
@@ -123,13 +125,14 @@ function replaceDashboardLink() {
   if (norm_(name) === 'tpw') {
     props_().setProperty(DASH_KEYS.ADMIN, newDashboardKey_());
   } else {
-    const keys = orgKeys_();
-    if (!keys[norm_(name)]) {
+    const old = orgKeys_()[norm_(name)];
+    if (!old) {
       ui.alert('No dashboard link found for "' + name + '".');
       return;
     }
-    keys[norm_(name)] = newDashboardKey_();
-    props_().setProperty(DASH_KEYS.ORGS, JSON.stringify(keys));
+    const org = props_().getProperty(DASH_KEYS.LINK_PREFIX + old);
+    props_().deleteProperty(DASH_KEYS.LINK_PREFIX + old);
+    addOrgKey_(org);
   }
   writeLinksSheet_();
   ui.alert('Done. The new link is on the "' + DASH.LINKS_SHEET + '" tab.');
@@ -139,21 +142,32 @@ function replaceDashboardLink() {
 function dashboardLinkFor_(org) {
   const url = dashboardUrl_();
   if (!url || !norm_(org)) return '';
-  const keys = orgKeys_();
-  if (!keys[norm_(org)]) {
-    keys[norm_(org)] = newDashboardKey_();
-    props_().setProperty(DASH_KEYS.ORGS, JSON.stringify(keys));
-    writeLinksSheet_();
+  let key = orgKeys_()[norm_(org)];
+  if (!key) {
+    key = addOrgKey_(org);
+    appendLinkRow_(org, key);
   }
-  return url + '?k=' + keys[norm_(org)];
+  return url + '?k=' + key;
 }
 
 function dashboardUrl_() {
   return props_().getProperty(DASH_KEYS.URL) || '';
 }
 
+/** { normalized organization name: key } for every organization link. */
 function orgKeys_() {
-  return JSON.parse(props_().getProperty(DASH_KEYS.ORGS) || '{}');
+  const all = props_().getProperties();
+  const keys = {};
+  Object.keys(all).forEach(p => {
+    if (p.indexOf(DASH_KEYS.LINK_PREFIX) === 0) keys[norm_(all[p])] = p.slice(DASH_KEYS.LINK_PREFIX.length);
+  });
+  return keys;
+}
+
+function addOrgKey_(org) {
+  const key = newDashboardKey_();
+  props_().setProperty(DASH_KEYS.LINK_PREFIX + key, org);
+  return key;
 }
 
 function newDashboardKey_() {
@@ -162,13 +176,11 @@ function newDashboardKey_() {
 
 /** Makes sure TPW and every known organization have a key. */
 function ensureDashboardKeys_() {
-  const p = props_();
-  if (!p.getProperty(DASH_KEYS.ADMIN)) p.setProperty(DASH_KEYS.ADMIN, newDashboardKey_());
+  if (!props_().getProperty(DASH_KEYS.ADMIN)) props_().setProperty(DASH_KEYS.ADMIN, newDashboardKey_());
   const keys = orgKeys_();
   dashboardOrgNames_().forEach(name => {
-    if (!keys[norm_(name)]) keys[norm_(name)] = newDashboardKey_();
+    if (!keys[norm_(name)]) addOrgKey_(name);
   });
-  p.setProperty(DASH_KEYS.ORGS, JSON.stringify(keys));
 }
 
 /** Organizations on the TPW Constants tab plus any found in the records, A–Z. */
@@ -205,6 +217,12 @@ function writeLinksSheet_() {
   sh.getRange(2, 1, rows.length, 3).setValues(rows);
 }
 
+/** Adds one organization's new link to the links tab (cheaper than rewriting it during a form submit). */
+function appendLinkRow_(org, key) {
+  const sh = ss_().getSheetByName(DASH.LINKS_SHEET);
+  if (sh) sh.appendRow([org, dashboardUrl_() + '?k=' + key, orgContacts_()[norm_(org)] || '']);
+}
+
 // ───────────────────────────── Web app ─────────────────────────────
 
 function doGet(e) {
@@ -229,11 +247,8 @@ function doGet(e) {
 function dashboardAccess_(key) {
   if (!key) return null;
   if (key === props_().getProperty(DASH_KEYS.ADMIN)) return { admin: true, key };
-  const keys = orgKeys_();
-  const match = Object.keys(keys).find(k => keys[k] === key);
-  if (!match) return null;
-  const name = dashboardOrgNames_().find(n => norm_(n) === match) || match;
-  return { org: name, key };
+  const org = props_().getProperty(DASH_KEYS.LINK_PREFIX + key);
+  return org ? { org, key } : null;
 }
 
 /**
