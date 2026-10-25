@@ -184,7 +184,7 @@
     return `<div>${head}<div class="chart-scroll"><div class="cols">${cols}</div></div></div>`;
   }
 
-  function overTime(view, sub, extra) {
+  function overTime(view, sub, showEstimates) {
     const pts = points(view);
     return `<div class="card">
       <div class="card-head">
@@ -197,8 +197,8 @@
       <div class="charts">
         ${chart('Participant hours delivered', 'hours', pts, fmt)}
         ${chart('Participants completed', 'completed', pts, fmt)}
-        ${extra ? chart('Rehab credits (days, estimate)', 'creditDays', pts, fmt) : ''}
-        ${extra ? chart('Taxpayer savings (estimate)', 'savings', pts, shortMoney) : ''}
+        ${showEstimates ? chart('Rehab credits (days, estimate)', 'creditDays', pts, fmt) : ''}
+        ${showEstimates ? chart('Taxpayer savings (estimate)', 'savings', pts, shortMoney) : ''}
       </div>
     </div>`;
   }
