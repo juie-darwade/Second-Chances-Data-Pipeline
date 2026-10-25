@@ -58,11 +58,11 @@
   .swatch { width: 11px; height: 11px; border-radius: 2px; flex: none; }
   .chart-scroll { overflow-x: auto; }
   .cols { display: flex; min-width: 100%; }
-  .col { flex: 1 0 44px; padding: 0 4px; }
-  .plot { height: 190px; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; border-bottom: 1px solid #c9d0d7; margin: 0 -4px; padding: 0 4px; }
-  .plot .v { font-size: 11px; margin-bottom: 4px; white-space: nowrap; }
+  .col { flex: 1 0 34px; padding: 0 3px; }
+  .plot { height: 190px; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; border-bottom: 1px solid #c9d0d7; margin: 0 -3px; padding: 0 3px; }
+  .plot .v { font-size: 10px; margin-bottom: 4px; white-space: nowrap; }
   .plot .b { width: 100%; max-width: 52px; border-radius: 3px 3px 0 0; }
-  .x { font-size: 11px; color: var(--muted); text-align: center; padding-top: 6px; white-space: nowrap; }
+  .x { font-size: 11px; line-height: 1.25; color: var(--muted); text-align: center; padding-top: 6px; white-space: nowrap; }
 
   .table-wrap { overflow-x: auto; }
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
@@ -180,7 +180,7 @@
     const cols = pts.map(p => `<div class="col">
         <div class="plot"><span class="v">${format(p[key])}</span>
           <span class="b" style="height:${Math.round((p[key] / max) * 160)}px;background:${COLORS[key]}"></span></div>
-        <div class="x">${esc(p.label)}</div></div>`).join('');
+        <div class="x">${esc(p.label).replace(' ', '<br>')}</div></div>`).join('');
     return `<div>${head}<div class="chart-scroll"><div class="cols">${cols}</div></div></div>`;
   }
 
